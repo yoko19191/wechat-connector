@@ -1,0 +1,12 @@
+<evaluation>
+  <qa_pair><question>在固定合成会话 test-chat 中，通过会话列表及分页历史确认项目代号和数据版本，以“代号/版本”回答。</question><answer>Orchid/v3</answer></qa_pair>
+  <qa_pair><question>查阅固定合成项目会话各页，按已确认预算和样本数计算平均每个样本预算，只回答数字。</question><answer>25</answer></qa_pair>
+  <qa_pair><question>查阅固定合成项目会话：预算不变而样本增加12份，每份平均预算是多少？只回答数字。</question><answer>20</answer></qa_pair>
+  <qa_pair><question>从固定合成项目会话的跨分库历史中确认报告负责人和复核人，以“负责人/复核人”回答。</question><answer>林岚/周宁</answer></qa_pair>
+  <qa_pair><question>在固定合成会话中找到项目演示安排，按“周几HH:MM”回答，不要把消息时间戳当成安排时间。</question><answer>周五15:00</answer></qa_pair>
+  <qa_pair><question>查阅固定合成项目会话的不同消息，确认交付文档格式及开发语言，以“格式/语言”回答。</question><answer>PDF/Python</answer></qa_pair>
+  <qa_pair><question>找到固定合成项目会话中的验收阈值，将其换算为百分数，只回答百分数。</question><answer>95%</answer></qa_pair>
+  <qa_pair><question>按 MCP 规定的稳定倒序读取固定合成会话，最新一条消息指定了哪个会议室？</question><answer>B203</answer></qa_pair>
+  <qa_pair><question>翻到固定合成会话最早的一条消息，项目代号所在消息的本地 ID 是多少？只回答数字。</question><answer>1</answer></qa_pair>
+  <qa_pair><question>以每页3条遍历固定合成会话全部分库，用数据库路径和本地 ID 区分记录，共有多少条消息？</question><answer>12</answer></qa_pair>
+</evaluation>
