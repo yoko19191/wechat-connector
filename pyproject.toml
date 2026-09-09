@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechat-connector"
-version = "0.1.2"
+version = "0.2.0"
 description = "Local WeChat initialization and read-only encrypted-snapshot MCP"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,6 +12,7 @@ dependencies = ["mcp==2.2.0", "zstandard==0.25.0"]
 
 [project.optional-dependencies]
 init = ["frida==17.17.0"]
+audit = ["tiktoken==0.14.0"]
 
 [project.scripts]
 wechat-connector = "wechat_connector.cli:main"

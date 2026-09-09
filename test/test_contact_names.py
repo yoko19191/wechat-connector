@@ -5,7 +5,7 @@ import shutil
 import unittest
 
 from mcp import Client
-import test_runtime as fixtures
+from . import test_runtime as fixtures
 from wechat_connector.cipher_db import sql_text
 from wechat_connector.errors import ConnectorError
 from wechat_connector.read_chat import all_chats

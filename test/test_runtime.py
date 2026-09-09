@@ -1,4 +1,4 @@
-"""Run: .venv/bin/python -m unittest -v test_runtime (synthetic encrypted data only)."""
+"""Run: .venv/bin/python -m unittest -v test.test_runtime (synthetic encrypted data only)."""
 
 import ctypes
 import hashlib
@@ -19,6 +19,7 @@ from wechat_connector.cipher_db import (authenticates, check_key, fingerprint, l
                        query, sql_text)
 from wechat_connector import snapshot as producer
 from wechat_connector import read_chat
+from wechat_connector.errors import ConnectorError
 
 
 class FixtureDB:
@@ -116,7 +117,7 @@ class RuntimeTests(unittest.TestCase):
                 read_chat.messages(loaded, "test-chat", limit)
         db, _, key = read_chat.shards(loaded)[0]
         before_hash = fingerprint(db)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ConnectorError):
             query(db, key, "DELETE FROM Name2Id;")
         self.assertEqual(before_hash, fingerprint(db))
         self.assertFalse(any(path.rglob("*-wal")))
@@ -260,11 +261,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("-readonly", args)
         self.assertEqual(options["timeout"], 30)
         with patch.object(cipher_db.subprocess, "run", side_effect=subprocess.TimeoutExpired("cmd", 30, output=key.hex())):
-            with self.assertRaises(RuntimeError) as caught:
+            with self.assertRaises(ConnectorError) as caught:
                 query(db, key, "SELECT 1;")
         self.assertNotIn(key.hex(), str(caught.exception))
         with patch.object(cipher_db.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", key.hex())):
-            with self.assertRaises(RuntimeError) as caught:
+            with self.assertRaises(ConnectorError) as caught:
                 query(db, key, "SELECT 1;")
         self.assertNotIn(key.hex(), str(caught.exception))
         for record in self.records:
@@ -272,7 +273,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_runtime_has_no_capture_dependency(self):
         self.assertIsNone(importlib.util.find_spec("frida"))
-        result = subprocess.run([os.sys.executable, "capture_keys.py"], capture_output=True, text=True)
+        result = subprocess.run([os.sys.executable, str(Path(__file__).resolve().parents[1] / "capture_keys.py")], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("disabled", result.stderr)
 

@@ -1,9 +1,9 @@
-"""Run with python3 test_doctor.py; synthetic files only."""
+"""Run with python3 -m test.test_doctor; synthetic files only."""
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from doctor import inventory, SQLITE_HEADER
+from wechat_connector.doctor import inventory, SQLITE_HEADER
 
 
 with TemporaryDirectory() as directory:

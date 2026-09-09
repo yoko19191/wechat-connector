@@ -161,10 +161,14 @@ def _run(path, key, sql, *, readonly=True):
     try:
         result = subprocess.run(args, input=setup + ".mode json\n" + sql + "\n",
                                 text=True, capture_output=True, timeout=30)
+    except FileNotFoundError:
+        raise ConnectorError("SQLCIPHER_NOT_FOUND", "Install SQLCipher and check the MCP process PATH.") from None
+    except subprocess.TimeoutExpired:
+        raise ConnectorError("QUERY_TIMEOUT", "The read exceeded 30 seconds; retry with a smaller time range.") from None
     except (OSError, subprocess.SubprocessError):
-        raise RuntimeError("SQLCipher unavailable or query exceeded 30 seconds") from None
+        raise ConnectorError("DATABASE_READ_FAILED", "SQLCipher could not run; check file and process permissions.") from None
     if result.returncode or result.stderr or not result.stdout.startswith("ok\n"):
-        raise RuntimeError("SQLCipher operation failed; sensitive diagnostics withheld")
+        raise ConnectorError("DATABASE_READ_FAILED", "SQLCipher read or validation failed; private diagnostics withheld.")
     data = result.stdout[3:].strip()
     sets = []
     try:
@@ -176,7 +180,7 @@ def _run(path, key, sql, *, readonly=True):
             sets.append(rows)
             data = data[end:].strip()
     except ValueError:
-        raise RuntimeError("Invalid SQLCipher response; sensitive diagnostics withheld") from None
+        raise ConnectorError("DATABASE_READ_FAILED", "Invalid SQLCipher response; private diagnostics withheld.") from None
     return sets
 
 

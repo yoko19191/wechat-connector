@@ -15,8 +15,8 @@ from unittest.mock import Mock, patch
 
 from mcp import Client, StdioServerParameters
 
-from test_runtime import FixtureDB
-import test_runtime as fixtures
+from .test_runtime import FixtureDB
+from . import test_runtime as fixtures
 from wechat_connector.cipher_db import fingerprint, load_keys, save_keys
 from wechat_connector.errors import ConnectorError
 from wechat_connector import initialize
@@ -146,7 +146,7 @@ class ProductTests(unittest.TestCase):
             server = create_server(keys_path=self.keys, snapshots_root=self.snapshots)
             async with Client(server) as client:
                 tools = (await client.list_tools()).tools
-                self.assertEqual({t.name for t in tools}, {'wechat_list_chats','wechat_get_chat_history'})
+                self.assertEqual({t.name for t in tools}, {'wechat_list_chats','wechat_get_chat_history','wechat_get_message'})
                 for tool in tools:
                     self.assertTrue(tool.annotations.read_only_hint)
                     self.assertFalse(tool.annotations.destructive_hint)
@@ -203,9 +203,10 @@ class ProductTests(unittest.TestCase):
             rows += result['rows']
             cursor = result['next_cursor']
         self.assertEqual(len(rows), 14)
-        self.assertEqual(len({(r['database'],r['local_id']) for r in rows}), 14)
-        self.assertEqual(rows[0]['local_id'], 7)
-        self.assertTrue(rows[0]['database'].endswith('message_1.db'))
+        self.assertEqual(len({r['message_ref'] for r in rows}), 14)
+        source = reader.call('message',message_ref=rows[0]['message_ref']).structured_content['source']
+        self.assertEqual(source['local_id'], '7')
+        self.assertEqual(source['database'], 'message_1.db')
         bad = reader.call('history', chat_id='other-chat', cursor=first['next_cursor'])
         self.assertEqual(bad.structured_content['code'], 'INVALID_CURSOR')
         bad = reader.call('chats', cursor=first['next_cursor'])
@@ -287,13 +288,15 @@ class ProductTests(unittest.TestCase):
                     self.assertFalse(result.is_error)
                     page=result.structured_content
                     rows+=page['rows'];cursor=page['next_cursor']
-                    if not cursor: return rows
-        rows=asyncio.run(collect())
-        fields=dict(row['message_content'].split('：',1) for row in rows)
+                    if not cursor:
+                        detail=await client.call_tool('wechat_get_message',{'message_ref':rows[-1]['message_ref']})
+                        return rows,detail.structured_content['source']['local_id']
+        rows,oldest_id=asyncio.run(collect())
+        fields=dict(row['text'].split('：',1) for row in rows)
         actual=[fields['项目代号']+'/'+fields['数据版本'],str(int(fields['预算'])//int(fields['样本数'])),
                 str(int(fields['预算'])//(int(fields['样本数'])+12)),fields['报告负责人']+'/'+fields['复核人'],
                 fields['演示时间'],fields['交付格式']+'/'+fields['语言'],str(int(float(fields['验收阈值'])*100))+'%',
-                rows[0]['message_content'].split('：',1)[1],str(rows[-1]['local_id']),str(len(rows))]
+                rows[0]['text'].split('：',1)[1],oldest_id,str(len(rows))]
         expected=[node.findtext('answer') for node in ET.parse(Path(__file__).with_name('evaluations.xml')).getroot()]
         self.assertEqual(actual,expected)
 

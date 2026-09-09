@@ -17,15 +17,24 @@ from .snapshot import FORMAT
 from .errors import ConnectorError
 
 
+MAX_MESSAGE_BYTES = 16 * 1024 * 1024
+
+
 def decode(content):
-    if content is None or isinstance(content, str):
+    if content is None:
+        return content
+    if isinstance(content, str):
+        if len(content.encode("utf-8")) > MAX_MESSAGE_BYTES:
+            raise ConnectorError("MESSAGE_TOO_LARGE", "Message exceeds the 16 MiB decoding limit.")
         return content
     if isinstance(content, bytes):
+        if len(content) > MAX_MESSAGE_BYTES:
+            raise ConnectorError("MESSAGE_TOO_LARGE", "Message exceeds the 16 MiB decoding limit.")
         if content.startswith(b"\x28\xb5\x2f\xfd"):
             with zstandard.ZstdDecompressor().stream_reader(io.BytesIO(content)) as stream:
                 content = stream.read(16 * 1024 * 1024 + 1)
             if len(content) > 16 * 1024 * 1024:
-                raise ValueError("Message exceeds 16 MiB decompression limit")
+                raise ConnectorError("MESSAGE_TOO_LARGE", "Message exceeds the 16 MiB decoding limit.")
         return content.decode("utf-8")
     raise ValueError("Unsupported message storage type")
 
@@ -132,13 +141,37 @@ def add_contact_names(snapshot, chats):
                     if value and value.strip()), username)
 
 
-def all_chats(snapshot, account=None):
+def normalize_query(value):
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip() or len(value) > 128:
+        raise ConnectorError("INVALID_QUERY", "Use a nonempty name/remark/WeChat ID, or omit query to list all chats.")
+    return value.strip().casefold()
+
+
+def matching_contacts(snapshot, query_text, account=None):
+    matched = {}
+    for path, relative, key in snapshot["databases"]:
+        current = Path(relative).parts[0]
+        if Path(relative).parts[2:] != ("contact", "contact.db") or (account is not None and current != account):
+            continue
+        # Unicode casefold is performed locally; SQL LIKE would treat %/_ as patterns.
+        names = query(path, key, "SELECT username,alias,nick_name,remark FROM contact;")
+        matched[current] = {row["username"] for row in names
+                            if any(isinstance(value, str) and query_text in value.casefold() for value in row.values())}
+    return matched
+
+
+def all_chats(snapshot, account=None, query_text=None):
+    query_text = normalize_query(query_text)
+    matched = matching_contacts(snapshot, query_text, account) if query_text is not None else {}
     chats = {}
     for path, relative, key in shards(snapshot):
         current_account = Path(relative).parts[0]
         if account is not None and account != current_account:
             continue
-        pairs = list(chat_tables(path, key))
+        pairs = [(name, table) for name, table in chat_tables(path, key)
+                 if query_text is None or name in matched.get(current_account, set()) or query_text in name.casefold()]
         # Keep compound queries below SQLite's SELECT limit even for large accounts.
         for start in range(0, len(pairs), 200):
             sql = " UNION ALL ".join(
@@ -188,7 +221,7 @@ def parse_time_range(start_time=None, end_time=None):
             "end_time": end.isoformat().replace("+00:00", "Z") if end else None}
 
 
-def history_candidates(snapshot, username, limit, account=None, before=None, *, start_time=None, end_time=None):
+def history_candidates(snapshot, username, limit, account=None, before=None, *, start_time=None, end_time=None, headers_only=False):
     if type(limit) is not int or not 1 <= limit <= 101:
         raise ValueError("Invalid internal page size")
     bounds = parse_time_range(start_time, end_time)
@@ -214,13 +247,20 @@ def history_candidates(snapshot, username, limit, account=None, before=None, *, 
             conditions.append(f"(coalesce(m.create_time,0),coalesce(m.sort_seq,0),{sql_text(relative)},m.local_id) "
                               f"< ({timestamp},{sequence},{sql_text(database)},{local_id})")
         where = "WHERE " + " AND ".join(conditions) if conditions else ""
-        rows = query(path, key, f'''SELECT m.local_id, m.server_id, m.local_type,
+        body_columns = ("length(CAST(m.message_content AS BLOB)) AS content_bytes" if headers_only else
+                        "typeof(m.message_content) AS content_storage, hex(m.message_content) AS content_hex")
+        server_id_column = "CAST(m.server_id AS TEXT) AS server_id" if headers_only else "m.server_id"
+        rows = query(path, key, f'''SELECT m.local_id, {server_id_column}, m.local_type,
             m.create_time, m.sort_seq, m.real_sender_id, n.user_name AS sender,
-            typeof(m.message_content) AS content_storage, hex(m.message_content) AS content_hex
+            {body_columns}
             FROM "{table}" m LEFT JOIN Name2Id n ON n.rowid=m.real_sender_id
             {where}
             ORDER BY coalesce(m.create_time,0) DESC, coalesce(m.sort_seq,0) DESC, m.local_id DESC LIMIT {limit};''')
         for item in rows:
+            if headers_only:
+                item.update(database=relative, chat_id=username)
+                results.append(item)
+                continue
             storage = item.pop("content_storage")
             content = bytes.fromhex(item.pop("content_hex"))
             if storage not in ("text", "blob", "null"):
@@ -232,6 +272,32 @@ def history_candidates(snapshot, username, limit, account=None, before=None, *, 
     # Preserve original row identity; do not silently deduplicate across shards.
     return sorted(results, key=history_order,
                   reverse=True)[:limit]
+
+
+def read_message(snapshot, header):
+    """Fetch only one already-selected row; never accept an arbitrary client path."""
+    path, _, key = next((entry for entry in snapshot["databases"] if entry[1] == header["database"]), (None, None, None))
+    if path is None:
+        raise ConnectorError("MESSAGE_NOT_FOUND", "Message source is not in the pinned snapshot.")
+    local_id = header["local_id"]
+    if type(local_id) is not int or not 0 <= local_id < 2**63:
+        raise ConnectorError("MESSAGE_NOT_FOUND", "Invalid message locator.")
+    table = "Msg_" + hashlib.md5(header["chat_id"].encode()).hexdigest()
+    rows = query(path, key, f'''SELECT typeof(message_content) AS storage,
+        length(CAST(message_content AS BLOB)) AS bytes,
+        CASE WHEN length(CAST(message_content AS BLOB)) <= {MAX_MESSAGE_BYTES}
+             THEN hex(message_content) END AS content_hex FROM "{table}" WHERE local_id={local_id};''')
+    if len(rows) != 1:
+        raise ConnectorError("MESSAGE_NOT_FOUND", "Message no longer exists in the pinned snapshot.")
+    row = rows[0]
+    if (row["bytes"] or 0) > MAX_MESSAGE_BYTES:
+        raise ConnectorError("MESSAGE_TOO_LARGE", "Message exceeds the 16 MiB decoding limit.")
+    if row["storage"] not in ("text", "blob", "null"):
+        raise ConnectorError("MESSAGE_PARSE_FAILED", "Unsupported message storage encoding.")
+    try:
+        return decode(bytes.fromhex(row["content_hex"] or "")) if row["storage"] != "null" else None
+    except (UnicodeError, zstandard.ZstdError):
+        raise ConnectorError("MESSAGE_PARSE_FAILED", "Message could not be decoded; raw bytes were not returned.") from None
 
 
 def history_order(row):

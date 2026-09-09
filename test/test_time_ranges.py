@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from mcp import Client
-import test_runtime as fixtures
+from . import test_runtime as fixtures
 from wechat_connector import read_chat
 from wechat_connector.errors import ConnectorError
 from wechat_connector.server import ReaderSession, create_server
@@ -72,15 +72,15 @@ class TimeRangeTests(unittest.TestCase):
             self.assertFalse(result.is_error)
             page=result.structured_content;rows+=page['rows'];cursor=page['next_cursor']
         self.assertEqual(len(rows),5)
-        self.assertEqual(len({(r['database'],r['local_id']) for r in rows}),5)
-        self.assertTrue(all(20<=r['create_time']<30 for r in rows))
-        self.assertEqual(rows[0]['create_time'],25)
+        self.assertEqual(len({r['message_ref'] for r in rows}),5)
+        self.assertTrue(all(at(20)<=r['time']<at(30) for r in rows))
+        self.assertEqual(rows[0]['time'],at(25))
         for changes in ({'start_time':at(21),'end_time':at(30)},{}):
             result=reader.call('history',chat_id='test-chat',cursor=first['next_cursor'],**changes)
             self.assertEqual(result.structured_content['code'],'INVALID_CURSOR')
         # The old message must still be returned even with newer rows in its shard.
         result=reader.call('history',chat_id='test-chat',limit=1,start_time=at(0),end_time=at(20))
-        self.assertEqual([r['create_time'] for r in result.structured_content['rows']],[10])
+        self.assertEqual([r['time'] for r in result.structured_content['rows']],[at(10)])
 
     def test_cli_time_filters_and_rejects_filters_without_conversation(self):
         s=self.snapshot()
@@ -104,7 +104,7 @@ class TimeRangeTests(unittest.TestCase):
                 self.assertIn('end_time',history.input_schema['properties'])
                 result=await client.call_tool('wechat_get_chat_history',{'chat_id':'test-chat','start_time':at(10),'end_time':at(20)})
                 self.assertFalse(result.is_error)
-                self.assertEqual([r['create_time'] for r in result.structured_content['rows']],[10])
+                self.assertEqual([r['time'] for r in result.structured_content['rows']],[at(10)])
                 result=await client.call_tool('wechat_get_chat_history',{'chat_id':'test-chat','start_time':'2026-09-01'})
                 self.assertTrue(result.is_error)
                 self.assertEqual(result.structured_content['code'],'INVALID_TIME_RANGE')

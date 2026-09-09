@@ -16,7 +16,7 @@ def main():
     init.add_argument("--account")
     init.add_argument("--import-keys", type=Path)
     init.add_argument("--import-snapshot", type=Path, help="Import only the encrypted branch of a verified snapshot")
-    commands.add_parser("serve", help="Run two local read-only MCP tools over stdio")
+    commands.add_parser("serve", help="Run local read-only MCP tools over stdio")
     for name in ("snapshot", "read", "doctor"):
         commands.add_parser(name, add_help=False)
     args, extra = parser.parse_known_args()

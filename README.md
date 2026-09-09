@@ -1,7 +1,7 @@
 # wechat-connector
 
 让 Agent 读取 Mac 微信聊天记录的本地 MCP 服务。支持显示联系人昵称、微信号和备注，
-并按指定会话、时间范围分页读取历史。
+并按指定会话、时间范围分页读取可读历史，按需展开单条消息详情。
 
 **首次由用户主动获取密钥，日常只读加密快照。** MCP 不发送消息、不启动或注入微信、
 不自动获取密钥、不自动刷新数据，也不直接读取微信正在使用的数据库。
@@ -108,16 +108,25 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 用 `codex mcp get wechat-connector` 检查配置，然后重新加载 MCP 连接或重启客户端。
 配置语法见 [Codex 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
 
-#### 使用 JSON 配置的其他客户端
+#### mcp.json 配置（完整 JSON）
 
-将此服务条目合并到客户端的 MCP 配置中，保留已有服务：
+如果客户端通过 `mcp.json`（有些客户端命名为 `.mcp.json`）管理 MCP，
+下面是使用 `mcpServers` 结构的完整配置。文件位置以客户端要求为准，
+不是放进本项目目录就会自动生效。已有配置时只合并 `wechat-connector` 条目，保留其他服务。
+
+将项目路径替换为本机实际的绝对路径，并用 `command -v uvx` 确认命令路径：
 
 ```json
 {
   "mcpServers": {
     "wechat-connector": {
       "command": "/opt/homebrew/bin/uvx",
-      "args": ["--from", "/absolute/path/to/wechat-connector", "wechat-connector", "serve"],
+      "args": [
+        "--from",
+        "/absolute/path/to/wechat-connector",
+        "wechat-connector",
+        "serve"
+      ],
       "env": {
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       }
@@ -129,14 +138,46 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 显式 `PATH` 用于让 GUI 客户端找到 Homebrew SQLCipher。配置中不填写密钥值。
 本项目不会自动修改客户端设置；本机以前生成的 `.local/` 配置文件不随 Git 分发，新用户使用上面的示例即可。
 
+#### 在“MCP 配置向导”中怎么填
+
+如果客户端提供类型、标题、命令、参数和环境变量表单，按下面填写即可生成等价配置：
+
+| 表单字段 | 填写内容 |
+|---|---|
+| 类型 | 选择 `stdio` |
+| MCP 标题（唯一） | `wechat-connector`；已存在同名项时编辑原有配置 |
+| 命令 | `/opt/homebrew/bin/uvx`，或 `command -v uvx` 返回的实际路径 |
+| 参数 | 下方四行，每行一个参数 |
+| 环境变量 | 下方 `PATH=...` 一行 |
+
+**参数栏：** 将第二行替换为项目的实际绝对路径。
+
+```text
+--from
+/absolute/path/to/wechat-connector
+wechat-connector
+serve
+```
+
+**环境变量栏：**
+
+```text
+PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+```
+
+命令栏只填可执行文件路径，不要把整条终端命令粘进去。
+参数栏不加 JSON 的逗号或引号；路径含空格时仍作为完整的一行，不要拆开。
+不要填 HTTP/SSE 地址、`init` 或密钥值。点击“应用配置”并保存后，重新加载 MCP 连接。
+
 ### 4. 确认连接成功
 
-客户端应能发现这两个工具：
+客户端应能发现这三个工具：
 
 | 工具 | 用途 | 参数 |
 |---|---|---|
-| `wechat_list_chats` | 显示会话列表和联系人名称 | `account?`、`limit=20`、`cursor?` |
-| `wechat_get_chat_history` | 按会话和时间读取历史 | `chat_id`、`account?`、`start_time?`、`end_time?`、`limit=20`、`cursor?` |
+| `wechat_list_chats` | 按名称/备注/微信号查找会话，或浏览列表 | `query?`、`account?`、`limit=20`、`cursor?` |
+| `wechat_get_chat_history` | 按会话和时间读取可读历史 | `chat_id`、`account?`、`start_time?`、`end_time?`、`limit=20`、`cursor?` |
+| `wechat_get_message` | 单条消息详情、来源和长正文续读 | `message_ref`、`cursor?` |
 
 可以直接对 Agent 说：
 
@@ -148,11 +189,15 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 
 ### 从名称取得 chat_id
 
-先调用 `wechat_list_chats`：
+先按名称片段调用 `wechat_list_chats`，无需遍历所有联系人：
 
 ```json
-{"limit": 20}
+{"query": "某某", "limit": 5}
 ```
+
+`query` 匹配备注、昵称、微信号或内部标识，采用去除首尾空白后的 Unicode 大小写无关子串匹配，
+不是模糊搜索，也不把 `%` / `_` 当通配符。同名候选全部返回，由你选择。
+省略 `query` 才是浏览全部会话；空白查询会报 `INVALID_QUERY`。翻页时保持同一查询条件。
 
 在结果的 `rows` 中，根据以下字段确认对象：
 
@@ -162,7 +207,8 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 | `remark` | 你设置的备注名，可能为 `null` |
 | `nickname` | 对方昵称或联系人库记录的群名称，可能为 `null` |
 | `alias` | 联系人库的 alias，通常是自定义微信号，可能为 `null` |
-| `chat_id` / `username` | 聊天对象的内部标识，用于准确定位会话 |
+| `chat_id` | 聊天对象的内部标识，用于准确定位会话；MCP 不再重复返回 `username` |
+| `last_activity` | 带时区的最近活动时间 |
 | `account` | 本地微信账号目录标识，多账号查询时需要原样传回 |
 
 `chat_id` 来自消息库的 `Name2Id.user_name`，不是昵称，也不一定等于自定义微信号。
@@ -196,14 +242,73 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 
 ### 超过一页怎么办
 
-每页最多 100 条。结果包含 `has_more` 和 `next_cursor`：
+每页请求上限为 100 条，但不是保证返回 100 条。0.2.0 优先保留完整正文，完整 MCP 工具结果限制为 **16 KiB UTF-8**，放不下下一条时提前结束当前页。结果包含 `has_more` 和 `next_cursor`：
 
 1. `has_more` 为 `true` 时，用 `next_cursor` 再调用同一个工具。
 2. 下一页保持相同 `chat_id`、`account`、`start_time`、`end_time`，只增加或替换 `cursor`。
 3. 继续到 `has_more` 为 `false`，不要把第一页当成全部聊天。
 
-游标绑定快照、工具、账号、会话和时间范围，不能交叉使用。名称可能重名，消息不会自动去重。
+游标绑定快照、工具、账号、名称查询或会话时间范围，不能交叉使用。游标只按最后实际返回的记录推进，不会越过尚未返回的消息。名称可能重名，消息不会自动去重。
 所有结果还包含 `snapshot_id`、`snapshot_created_at` 和 `live: false`；名称、备注和消息均以该快照为准。
+
+## 0.2.0：读取结果与单条详情
+
+**完整数据仅在 `structuredContent` 中返回。** MCP 文本 `content` 只是一条不超过 200 字符的提示，
+不是聊天正文；客户端必须把结构化结果提供给 Agent。不会把同一份 JSON 复制到两个字段。
+16 KiB 预算包括结构化结果、提示文本和分页元信息，不等同于固定 token 数。
+
+历史页共享 `chat`、`participants` 和 `time_range`。`rows` 中的每条消息包含：
+
+| 字段 | 含义 |
+|---|---|
+| `message_ref` | 当前服务进程内的短引用，用于读取详情 |
+| `time` | UTC RFC3339 时间；无法解释的时间为 `null` |
+| `speaker` | 本页 `participants` 中的键，例如 `p0`；必须用本页映射解释 |
+| `kind` | `text`、`reply`、`file`、`image`、`voice`、`video`、`emoji`、`link`、`system` 或 `unsupported` |
+| `text` | 普通文字为原文，其他类型为确定性提取的可读内容 |
+| `status` | `ok` 或明确的解析/类型错误，不能忽略错误并声称已读全 |
+| `reply_to` | 引用消息存在时的直接引用来源信息；不展开整条历史引用链 |
+| `content_complete` | 当前消息的内容是否完整 |
+| `content_offset` | 当前文本片段在规范化内容中的 Unicode 字符偏移 |
+| `next_content_cursor` | 仅当单条消息超出预算时提供，用于继续读取该消息 |
+
+文件返回名称、类型和大小；链接卡片返回标题、描述及净化链接；图片等只返回类型和已有说明，
+不会猜测媒体内容。协议 XML、附件 AES 密钥、上传令牌和内部签名不进入普通查询或详情。
+微信文章链接只保留文章定位参数；其他链接移除用户凭据、查询参数和片段，`link_sanitized` 标明是否净化。
+用户手工写在普通聊天正文中的敏感信息不保证自动识别。
+
+### 单条消息详情与长消息续读
+
+绝大多数消息会完整返回，只减少每页条数。**只有一条消息独自也超过预算时才分段**。
+此时历史结果可能同时出现：`has_more: false`（没有其他消息），但 `content_complete: false`（这条消息尚未读完）。
+
+把该行的引用和内容游标传给新工具：
+
+```json
+{
+  "message_ref": "<历史结果中的 message_ref>",
+  "cursor": "<该行的 next_content_cursor>"
+}
+```
+
+以上参数用于 `wechat_get_message`。它返回 `message`、必要的 `source` 信息、`has_more` 和 `next_cursor`。
+继续传入同一 `message_ref` 和新 `next_cursor`，按 `message.content_offset` 拼接 `message.text`，
+直到没有下一段。省略 `cursor` 则从消息开头读起，用于查看详情或来源。
+所有需要暴露的 64 位来源 ID 都是字符串，避免 JavaScript 整数精度损失。
+
+短引用绑定服务进程、快照、账号、会话和原始记录；最多保留 4,096 条。
+服务重启或引用淘汰后会返回 `MESSAGE_REF_EXPIRED`，重新查询历史即可获得新引用。
+它不是持久的数据库 ID，也不能用来读取文件路径或任意 SQL。
+
+超过 16 MiB 解码保护的消息报告 `MESSAGE_TOO_LARGE`；损坏、未知内容报告明确状态，
+不当作空消息、不静默跳过，也不通过详情返回原始 XML。状态非 `ok` 且没有内容游标时，不要无限重试。
+
+### 从 0.1.x 升级
+
+这是返回结构升级，版本为 **0.2.0**。两个旧工具名称保留，新增 `wechat_get_message`；
+旧游标失效，需重启客户端并重新发现工具。调用方应读取 `structuredContent`，
+使用 `text`、带时区的 `time` 和页头参与人映射，不再依赖逐行原始数据库字段。
+CLI 的原始行读取保留用于本地核验，可能包含协议 XML，不应将该原始输出直接充当精简 MCP 返回。
 
 ## 刷新数据与终端查询
 
@@ -283,7 +388,16 @@ MCP 每次调用都检查本地密钥文件；文件被删除后，下一次调�
 | `INVALID_TIME_RANGE` | 使用带时区的 RFC3339 时间，且开始早于结束 |
 | `INVALID_CURSOR` | 从第一页重新开始，并保持账号、会话和时间范围不变 |
 | `CONTACT_AMBIGUOUS` | 联系人库中同一内部用户名有冲突名称，程序未猜测身份 |
-| `READ_FAILED` | 数据、表结构或查询异常；不会回退到原库或明文库 |
+| `INVALID_QUERY` | 名称查询为空；填写名称片段，或省略 query 浏览会话 |
+| `CURSOR_VERSION_MISMATCH` | 旧版游标已失效，从第一页重新查询 |
+| `MESSAGE_REF_EXPIRED` | 服务已重启或引用已淘汰，重新查询历史 |
+| `MESSAGE_PARSE_FAILED` / `UNSUPPORTED_MESSAGE` | 明确未完整解释原消息，不返回原始 XML |
+| `MESSAGE_TOO_LARGE` | 超过单条 16 MiB 解码保护，不假装已返回完整内容 |
+| `QUERY_TIMEOUT` | 数据库调用超过 30 秒，缩小时间范围后再试 |
+| `SQLCIPHER_NOT_FOUND` | 安装 SQLCipher，并检查客户端进程 PATH |
+| `DATABASE_READ_FAILED` / `SNAPSHOT_INVALID` | 检查数据库、快照完整性或表结构 |
+| `INVALID_ARGUMENTS` | 检查工具参数；未知参数不会被静默忽略 |
+| `READ_FAILED` | 未预期的读取错误；不会回退到原库或明文库 |
 | 看不到刚收到的消息或新备注 | 手动刷新快照，再重启 MCP 连接 |
 
 可用下面的只读诊断查看微信版本、数据路径和访问错误：
@@ -298,22 +412,21 @@ uvx --from /absolute/path/to/wechat-connector wechat-connector doctor
 
 ## 开发与验证
 
-基础测试环境不要安装 Frida；首次捕获测试使用单独环境：
+自动化测试和合成评测数据位于 `test/`。在项目根目录运行以下命令；基础测试环境不要安装 Frida，首次捕获测试使用单独环境：
 
 ```bash
 uv venv .venv
 uv pip install --python .venv/bin/python -e .
-python3 test_doctor.py
-.venv/bin/python -m unittest -v test_runtime test_product test_time_ranges test_contact_names
+.venv/bin/python -m unittest discover -s test -t . -v
 
 uv venv .local/init-test-venv
 uv pip install --python .local/init-test-venv/bin/python -e '.[init]'
-.local/init-test-venv/bin/python -m unittest -v test_capture_native
+.local/init-test-venv/bin/python -m unittest -v test.test_capture_native
 ```
 
-基础测试覆盖 WAL、认证、只读拒写、密钥缺失、迁移、中断、分页、时区边界和联系人名称。
-真实捕获桥接测试只运行合成 CommonCrypto 进程，不运行微信。
-`evaluations.xml` 的十条固定合成问答通过 MCP 列表及分页结果校验，不包含真实聊天；这不是独立模型能力评测。
+基础测试覆盖 WAL、认证、只读拒写、密钥缺失、迁移、中断、分页、时区边界、联系人查找、消息白名单解析、凭据过滤、响应预算、长消息续读和引用过期。
+基础测试发现命令在未安装 Frida 时会跳过可选捕获测试；上面的独立命令再验证该测试。真实捕获桥接测试只运行合成 CommonCrypto 进程，不运行微信。
+`test/evaluations.xml` 的十条固定合成问答通过 MCP 列表及分页结果校验，不包含真实聊天；这不是独立模型能力评测。
 
 本机曾对一份 331,052 条消息的既有快照完成迁移前后逐行对比。拥有该基线的开发者可运行：
 
@@ -322,6 +435,21 @@ uv pip install --python .local/init-test-venv/bin/python -e '.[init]'
   --snapshot /absolute/path/to/old/snapshot \
   --against /absolute/path/to/migrated/encrypted-snapshot
 ```
+
+本地性能/上下文回放仅输出统计，不导出聊天或凭据：
+
+```bash
+uv pip install --python .venv/bin/python -e '.[audit]'
+.venv/bin/python audit_agent_tools.py --query '联系人甲' --query '联系人乙' --limit 50
+```
+
+名称需唯一匹配。脚本比较旧原始结构与新结构，验证可读内容及直接引用保留，并统计调用数、字节和延迟。
+Token 使用本地 `tiktoken 0.14.0 / o200k_base`（可选 `cl100k_base`）计算，不调用远端模型，
+也不声称这是当前模型的精确 tokenizer。
+
+本机两段实际历史回放分别保留 36 / 50 条消息，结构化结果由 26,679 / 38,059 字节降到
+11,413 / 11,751 字节，合计减少 **64.22%**；同一 `o200k_base` 编码下由 24,165 降到 7,911 tokens。
+这不是通过删掉可读正文达成的，参数、原文及凭据未写入提交的测试样本。
 
 本地打包：`uv build --out-dir .local/dist`。不会自动公开发布。
 根目录旧脚本保留兼容入口；旧 `capture_keys.py` 已停用，首次获取仅通过交互式 `init` 执行。
