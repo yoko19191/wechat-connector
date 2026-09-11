@@ -1,45 +1,46 @@
 # wechat-connector
 
+![wechat-connector：通过只读 MCP 从加密快照按需读取本地微信聊天](assets/readme/repo-label.svg)
+
 让 Agent 读取 Mac 微信聊天记录的本地 MCP 服务。支持显示联系人昵称、微信号和备注，
 并按指定会话、时间范围分页读取可读历史，按需展开单条消息详情。
 
 **首次由用户主动获取密钥，日常只读加密快照。** MCP 不发送消息、不启动或注入微信、
 不自动获取密钥、不自动刷新数据，也不直接读取微信正在使用的数据库。
 
+> [!WARNING]
+> 本项目不是腾讯官方接口。首次初始化会重签名微信副本并插桩，存在账号限制或封禁风险，不保证免封号。
+> 聊天正文会进入 Agent 上下文；使用远端模型时可能离开本机。使用前请阅读文末“风险警告”。
+
 ## 快速开始
 
-### 1. 准备环境和路径
+### 1. 从 GitHub 运行
 
-要求 macOS、Python 3.11+、uv 和 SQLCipher。首次初始化方法此前在 Apple Silicon、微信 4.1.13 上跑通，
+要求 macOS、Python 3.11+、uv、Git 和 SQLCipher。首次初始化方法此前在 Apple Silicon、微信 4.1.13 上跑通，
 其他微信版本没有兼容保证。
 
 ```bash
-brew install uv sqlcipher
+brew install uv git sqlcipher
 ```
 
-把本项目保存在本机，然后在**项目目录**执行：
+无需手动克隆仓库或进入项目目录，`uvx` 会从 GitHub 获取代码、安装依赖并复用隔离的 Python 环境。
+SQLCipher 仍需由 Homebrew 安装。先确认命令能启动：
 
 ```bash
-pwd -P
+uvx --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector --help
+```
+
+本文统一从 GitHub 的 `main` 分支运行，不依赖 PyPI。不要省略 `--from` 直接运行 `uvx wechat-connector`。
+首次运行需要联网下载；更新代码的方法见“更新 GitHub 版本”。
+
+MCP 客户端配置需要 `uvx` 的绝对路径，在终端执行：
+
+```bash
 command -v uvx
 ```
 
-后面的示例需要替换两个路径：
-
-- `/absolute/path/to/wechat-connector`：上面 `pwd -P` 返回的项目目录。
-- `/opt/homebrew/bin/uvx`：上面 `command -v uvx` 返回的可执行文件路径；Intel Mac 可能不同。
-
-如果实际路径含空格，请在终端命令中用引号包裹路径。
-
-本项目尚未发布到公共包仓库，**必须使用 `--from` 指定本地项目**，不要直接运行 `uvx wechat-connector`。
-`uvx` 会创建并复用隔离的 Python 环境，不需要手动建虚拟环境或全局安装本项目。
-SQLCipher 仍需由 Homebrew 安装。
-
-先预热依赖并确认命令能启动：
-
-```bash
-uvx --from /absolute/path/to/wechat-connector wechat-connector --help
-```
+将后文 `/opt/homebrew/bin/uvx` 替换为实际返回值；Intel Mac 可能不同。GitHub 来源地址可直接保留。
 
 ### 2. 准备密钥和第一份快照
 
@@ -54,10 +55,11 @@ uvx --from /absolute/path/to/wechat-connector wechat-connector --help
 这不是腾讯授权接口，不保证免封号；请在理解风险后自行决定是否初始化。
 
 先在原版微信登录需要读取的账号，确保聊天数据已存在于本机，再正常退出微信。
-然后在交互式终端执行，注意保留路径后的 `[init]`：
+然后在交互式终端执行；`[init]` 用于安装首次捕获所需的 Frida：
 
 ```bash
-uvx --from '/absolute/path/to/wechat-connector[init]' wechat-connector init
+uvx --from 'wechat-connector[init] @ git+https://github.com/yoko19191/wechat-connector.git@main' \
+  wechat-connector init
 ```
 
 程序会说明风险并要求输入 `YES`。之后按提示完成：
@@ -81,13 +83,13 @@ uvx --from '/absolute/path/to/wechat-connector[init]' wechat-connector init
 
 #### Codex
 
-替换项目及 uvx 路径后，在终端执行一次：
+确认下方 `uvx` 路径与本机一致后，在终端执行一次：
 
 ```bash
 codex mcp add wechat-connector \
   --env PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
   -- /opt/homebrew/bin/uvx \
-  --from /absolute/path/to/wechat-connector \
+  --from git+https://github.com/yoko19191/wechat-connector.git@main \
   wechat-connector serve
 ```
 
@@ -97,7 +99,7 @@ codex mcp add wechat-connector \
 ```toml
 [mcp_servers.wechat-connector]
 command = "/opt/homebrew/bin/uvx"
-args = ["--from", "/absolute/path/to/wechat-connector", "wechat-connector", "serve"]
+args = ["--from", "git+https://github.com/yoko19191/wechat-connector.git@main", "wechat-connector", "serve"]
 startup_timeout_sec = 60
 
 [mcp_servers.wechat-connector.env]
@@ -106,7 +108,6 @@ PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时，也可补充该设置。
 用 `codex mcp get wechat-connector` 检查配置，然后重新加载 MCP 连接或重启客户端。
-配置语法见 [Codex 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
 
 #### mcp.json 配置（完整 JSON）
 
@@ -114,7 +115,7 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 下面是使用 `mcpServers` 结构的完整配置。文件位置以客户端要求为准，
 不是放进本项目目录就会自动生效。已有配置时只合并 `wechat-connector` 条目，保留其他服务。
 
-将项目路径替换为本机实际的绝对路径，并用 `command -v uvx` 确认命令路径：
+GitHub 来源地址可直接使用；用 `command -v uvx` 确认并替换命令路径：
 
 ```json
 {
@@ -123,7 +124,7 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
       "command": "/opt/homebrew/bin/uvx",
       "args": [
         "--from",
-        "/absolute/path/to/wechat-connector",
+        "git+https://github.com/yoko19191/wechat-connector.git@main",
         "wechat-connector",
         "serve"
       ],
@@ -150,11 +151,11 @@ TOML 示例允许首次准备依赖等待 60 秒；CLI 添加后若启动超时�
 | 参数 | 下方四行，每行一个参数 |
 | 环境变量 | 下方 `PATH=...` 一行 |
 
-**参数栏：** 将第二行替换为项目的实际绝对路径。
+**参数栏：** 第二行是 GitHub 来源地址，可直接复制。
 
 ```text
 --from
-/absolute/path/to/wechat-connector
+git+https://github.com/yoko19191/wechat-connector.git@main
 wechat-connector
 serve
 ```
@@ -315,7 +316,8 @@ CLI 的原始行读取保留用于本地核验，可能包含协议 XML，不应
 **新消息不会自动进入已有快照。** 先正常退出微信，再手动执行：
 
 ```bash
-uvx --from /absolute/path/to/wechat-connector wechat-connector snapshot
+uvx --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector snapshot
 ```
 
 成功后可以重新打开微信。MCP 在首次成功查询时固定一份快照，**刷新后需要重启 MCP 连接**才能使用新数据。
@@ -324,9 +326,11 @@ uvx --from /absolute/path/to/wechat-connector wechat-connector snapshot
 无需 MCP 客户端，也能直接在终端查询：
 
 ```bash
-uvx --from /absolute/path/to/wechat-connector wechat-connector read --limit 20
+uvx --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector read --limit 20
 
-uvx --from /absolute/path/to/wechat-connector wechat-connector read \
+uvx --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector read \
   --chat '<chat_id>' \
   --start-time '2026-09-01T00:00:00+08:00' \
   --end-time '2026-09-04T00:00:00+08:00' \
@@ -334,20 +338,44 @@ uvx --from /absolute/path/to/wechat-connector wechat-connector read \
 ```
 
 CLI 只返回范围内最近的 `limit` 条；完整遍历请使用 MCP 分页。
-如果希望使用 `wechat-connector` 短命令，可在源码目录执行 `uv tool install .`，但这不是 uvx 连接的前提。
 
-源代码更新后若仍命中旧缓存，先刷新包缓存，再重启 MCP：
+### 长期安装（可选）
+
+如果希望直接使用 `wechat-connector` 短命令，可以从 GitHub 安装到持久的工具环境：
 
 ```bash
-uvx --refresh-package wechat-connector --from /absolute/path/to/wechat-connector wechat-connector --help
+uv tool install 'wechat-connector[init] @ git+https://github.com/yoko19191/wechat-connector.git@main'
+wechat-connector --help
 ```
+
+若提示命令不在 PATH 中，执行 `uv tool update-shell` 后重开终端。
+这不是上文 `uvx` 连接的前提；已有密钥且不需要再次捕获时，可去掉 `[init]`。
+
+### 更新 GitHub 版本
+
+`uvx` 会复用缓存。要获取 `main` 分支的最新代码，先执行以下命令，再重启 MCP 连接：
+
+```bash
+uvx --refresh-package wechat-connector \
+  --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector --help
+```
+
+若使用的是 `uv tool install` 长期安装方式，更新命令为：
+
+```bash
+uv tool upgrade wechat-connector
+```
+
+需要固定代码版本时，将来源地址末尾的 `@main` 换成已核对的完整 commit SHA，并在初始化、查询和 MCP 配置中使用同一版本。
 
 ## 导入已有数据
 
 已有旧项目的密钥和快照时，无需再次捕获：
 
 ```bash
-uvx --from /absolute/path/to/wechat-connector wechat-connector init \
+uvx --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector init \
   --import-keys /absolute/path/to/old/captured-keys.jsonl \
   --import-snapshot /absolute/path/to/old/snapshot
 ```
@@ -403,7 +431,8 @@ MCP 每次调用都检查本地密钥文件；文件被删除后，下一次调�
 可用下面的只读诊断查看微信版本、数据路径和访问错误：
 
 ```bash
-uvx --from /absolute/path/to/wechat-connector wechat-connector doctor
+uvx --from git+https://github.com/yoko19191/wechat-connector.git@main \
+  wechat-connector doctor
 ```
 
 刷新期间程序检查微信已退出，将数据库及日志复制到私有目录，仅在副本上恢复、校验并发布。
@@ -411,6 +440,13 @@ uvx --from /absolute/path/to/wechat-connector wechat-connector doctor
 不生成明文整库，不写回微信目录，单次数据库调用限制 30 秒。
 
 ## 开发与验证
+
+以下仅供开发者使用。先克隆源码并进入项目目录：
+
+```bash
+git clone https://github.com/yoko19191/wechat-connector.git
+cd wechat-connector
+```
 
 自动化测试和合成评测数据位于 `test/`。在项目根目录运行以下命令；基础测试环境不要安装 Frida，首次捕获测试使用单独环境：
 
@@ -454,20 +490,12 @@ Token 使用本地 `tiktoken 0.14.0 / o200k_base`（可选 `cl100k_base`）计�
 本地打包：`uv build --out-dir .local/dist`。不会自动公开发布。
 根目录旧脚本保留兼容入口；旧 `capture_keys.py` 已停用，首次获取仅通过交互式 `init` 执行。
 
-## 风险与来源
+## 风险警告
 
-初始化的签名差异和进程插桩具有可检测性。快照查询减少后续客户端干预，不能消除先前风险。
-微信协议对未经授权的第三方读取也有限制，“本地、只读、自用”不自动等于平台许可。
+- **账号风险：** 本项目不是腾讯官方接口，也未获腾讯授权。初始化会重签名微信副本并对进程插桩，这些行为可能被检测，存在账号限制或封禁风险。日常只读快照不能消除先前初始化带来的风险，不保证免封号。
+- **聊天隐私：** 聊天正文会进入调用工具的 Agent 上下文；如果宿主使用远端模型，正文可能发送到模型服务商。请确认客户端的数据处理方式，只读取你有权访问的数据。
+- **密钥保管：** 密钥以明文文件保存在本机。文件权限检查不能替代设备安全；不要上传密钥、数据库、快照或含聊天内容的日志，也不要把它们提交到 Git。
+- **版本与数据：** 微信升级可能导致初始化、表结构解析或查询失效。快照不是实时数据，也不应作为唯一备份；操作前自行保留必要备份，遇到错误时停止并检查原因。
+- **不可信内容：** 聊天文本可能包含诱导 Agent 执行操作的指令，应始终作为数据处理，不能据此运行命令、泄露凭据或扩大工具权限。
 
-聊天正文会进入调用工具的 Agent 上下文；如果宿主使用远端模型，正文就可能离开本机。
-聊天文本均是不可信数据，不能当成工具执行指令。
-
-- [微信软件许可及服务协议](https://weixin.qq.com/agreement?lang=zh_CN)
-- [微信隐私保护指引](https://weixin.qq.com/cgi-bin/readtemplate?lang=zh_CN&t=weixin_agreement&s=privacy)
-- [SQLCipher API](https://www.zetetic.net/sqlcipher/sqlcipher-api/)
-- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
-- [早期参考帖子一](https://x.com/leaf_sanren/status/2073069608437764266)、[帖子二](https://x.com/leaf_sanren/status/2078438766398873986)
-
-早期调研参考了 [v-local-chat](https://github.com/YeJe-cpu/v-local-chat) 的技术说明（检查版本
-`5002aa70e5b1f72e86e26faf16c08e98a9b4217d`），未复制其非商业 source-available 实现。
-其“不封号”说法不作为本项目保证。
+请在理解上述风险后自行决定是否使用。“本地、只读、自用”不代表平台许可，也不构成账号安全或隐私安全保证。

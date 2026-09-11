@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">wechat-connector</title>
+  <desc id="desc">让 Agent 按需读取本地微信聊天。流程示意：从加密快照，经只读 MCP，读取聊天记录。</desc>
+  <!--
+    Audience: Mac users connecting their local WeChat history to an Agent.
+    Value: Read selected messages from encrypted snapshots through MCP.
+    Proof: The snapshot-to-MCP read path, shown as a conceptual flow.
+    First action: Run the GitHub-distributed CLI help command (see README).
+    Direction: Integrated technical title and a message/archive motif.
+    Palette: ink #101e19, paper #eff5ed, green #8ddba2,
+             muted #b8c9be, rules #385247.
+    Typography: system sans, 84 title / 36 labels / 22 context.
+    Geometry: 8-unit spacing, 2-unit strokes, 8-unit component corners.
+  -->
+  <rect width="1200" height="400" rx="24" fill="#101e19"/>
+
+  <g id="project-title" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+    <text x="56" y="54" fill="#b8c9be" font-size="22" letter-spacing="2">macOS / LOCAL WECHAT / MCP</text>
+    <text x="52" y="147" fill="#eff5ed" font-size="84" font-weight="700" letter-spacing="-3">wechat<tspan fill="#8ddba2">-</tspan>connector</text>
+    <text x="56" y="205" fill="#b8c9be" font-size="36">让 Agent 按需读取本地微信聊天</text>
+  </g>
+
+  <!-- Two message shapes share a connector, forming a project-specific mark. -->
+  <g id="message-connector-mark" transform="translate(990 86)" stroke="#8ddba2" stroke-width="3" stroke-linejoin="round" fill="none">
+    <path d="M0 0 H70 Q78 0 78 8 V47 Q78 55 70 55 H28 L13 69 V55 H8 Q0 55 0 47 Z"/>
+    <path d="M63 78 V92 Q63 100 71 100 H112 L128 114 V100 H137 Q145 100 145 92 V53 Q145 45 137 45 H102"/>
+    <path d="M52 28 H92 V72 H115"/>
+    <circle cx="52" cy="28" r="4" fill="#8ddba2" stroke="none"/>
+    <circle cx="115" cy="72" r="4" fill="#8ddba2" stroke="none"/>
+  </g>
+
+  <path d="M56 248 H1144" stroke="#385247" stroke-width="2"/>
+
+  <g id="snapshot-read-flow" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="36" fill="#eff5ed">
+    <g id="encrypted-snapshot" stroke="#8ddba2" stroke-width="2" stroke-linejoin="round" fill="none">
+      <path d="M65 294 V284 H107 V294 M59 302 V294 H113 V302"/>
+      <rect x="56" y="302" width="60" height="48" rx="8"/>
+      <path d="M79 323 V317 a7 7 0 0 1 14 0 V323"/>
+      <rect x="75" y="323" width="22" height="17" rx="3"/>
+    </g>
+    <text x="140" y="332">加密快照</text>
+
+    <g id="read-path" fill="none" stroke="#8ddba2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M320 320 H454 M444 310 L454 320 L444 330"/>
+      <path d="M682 320 H798 M788 310 L798 320 L788 330"/>
+    </g>
+
+    <g id="readonly-mcp">
+      <rect x="480" y="283" width="176" height="72" rx="8" fill="#8ddba2"/>
+      <text x="568" y="332" text-anchor="middle" fill="#101e19" font-size="36" font-weight="650">只读 MCP</text>
+    </g>
+
+    <g id="chat-records" stroke="#8ddba2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M838 291 H881 Q889 291 889 299 V331 Q889 339 881 339 H851 L837 351 V339 Q829 339 829 331 V299 Q829 291 838 291 Z"/>
+      <path d="M844 306 H874 M844 318 H867"/>
+    </g>
+    <text x="914" y="332">聊天记录</text>
+  </g>
+</svg>
